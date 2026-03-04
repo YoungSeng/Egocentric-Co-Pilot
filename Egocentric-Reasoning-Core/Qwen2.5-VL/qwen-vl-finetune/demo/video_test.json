@@ -1,0 +1,41 @@
+[
+    {
+        "video": "raw_videos/training/309/UfWND-lc4sc.mp4",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "You will be given a question with multiple answer options labeled A, B, C, etc. Each option may contain detailed content.\n Carefully read the question and options, and choose the one correct answer.\n Respond with only one uppercase letter (A, B, C, etc.) - do not include any explanation.\n\nQuestion: <video>\nWhen preparing potstickers, during which time interval(s) did the participant perform: 'mix the bowl of ground beef by hand'? Select all correct segments.\nOptions:\nA. 00:02:35.000 - 00:02:44.000\nB. 00:01:22.000 - 00:01:25.000\nC. 00:01:28.000 - 00:01:33.000\nD. 00:01:43.000 - 00:02:20.000\nE. 00:01:34.000 - 00:01:42.000"
+      },
+      {
+        "from": "gpt",
+        "value": "B"
+      }
+    ]
+  },
+  {
+    "video": "raw_videos/training/103/P8SY69LYkx0.mp4",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "You will be given a question with multiple answer options labeled A, B, C, etc. Each option may contain detailed content.\n Carefully read the question and options, and choose the one correct answer.\n Respond with only one uppercase letter (A, B, C, etc.) - do not include any explanation.\n\nQuestion: <video>\nIdentify the precise time interval when pepper powder was added during the preparation of burger. Select the exact timeframe:\nOptions:\nA. 00:02:35.000 - 00:02:54.000\nB. 00:03:50.000 - 00:03:57.000\nC. 00:00:49.000 - 00:01:08.000\nD. 00:01:49.000 - 00:02:13.000\nE. 00:03:14.000 - 00:03:40.000"
+      },
+      {
+        "from": "gpt",
+        "value": "C"
+      }
+    ]
+  },
+  {
+    "video": "raw_videos/training/324/IqD6qnug7tc.mkv",
+    "conversations": [
+      {
+        "from": "human",
+        "value": "You will be given a question with multiple answer options labeled A, B, C, etc. Each option may contain detailed content.\n Carefully read the question and options, and choose the one correct answer.\n Respond with only one uppercase letter (A, B, C, etc.) - do not include any explanation.\n\nQuestion: <video>\nObserving the cooking process in the video, what is the CORRECT chronological order of ingredients being added to the dish? Select the exact sequence from first to last:\nOptions:\nA. SEQUENCE: chicken stock cube → water → chilis\nB. SEQUENCE: chilis → chicken stock cube → water\nC. SEQUENCE: chilis → water → chicken stock cube\nD. SEQUENCE: chicken stock cube → chilis → water\nE. SEQUENCE: water → chilis → chicken stock cube"
+      },
+      {
+        "from": "gpt",
+        "value": "C"
+      }
+    ]
+  }
+]

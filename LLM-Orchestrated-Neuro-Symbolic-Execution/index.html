@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Intelligent Voice Assistant Client / 智能语音助手客户端</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;margin:0;background:#f0f2f5;color:#333;display:flex;justify-content:center}
+  .container{width:90%;max-width:880px;background:#fff;margin:24px;padding:24px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.1)}
+  h1{margin:0 0 16px}
+  #controls{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
+  #wsUrl{padding:10px;border:1px solid #ccc;border-radius:6px;min-width:280px;font-size:16px}
+  #connectBtn{padding:10px 22px;border:none;border-radius:6px;background:#007bff;color:#fff;font-size:16px;cursor:pointer}
+  #connectBtn.connected{background:#dc3545}
+  .status-panel{display:flex;gap:12px;flex-wrap:wrap}
+  .status-box{flex:1;min-width:220px;padding:10px 12px;border-radius:8px;font-weight:600}
+  #wsStatus.connected{color:#155724;background:#d4edda;border:1px solid #c3e6cb}
+  #wsStatus.disconnected{color:#721c24;background:#f8d7da;border:1px solid #f5c6cb}
+  #audioStatus.recording{color:#856404;background:#fff3cd;border:1px solid #ffeeba}
+  #audioStatus.playing{color:#0c5460;background:#d1ecf1;border:1px solid #bee5eb}
+  #audioStatus.idle{color:#383d41;background:#e2e3e5;border:1px solid #d6d8db}
+  #videoPreview{margin-top:12px;border:5px solid #fff;box-shadow:0 4px 8px rgba(0,0,0,.15);border-radius:8px;background:#000;width:100%;max-width:640px;height:auto}
+  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:8px}
+  .small{font-size:12px;color:#666}
+  .vu{height:8px;background:#e9ecef;border-radius:6px;overflow:hidden}
+  .vu > div{height:100%;width:0%}
+  .vu .bar{background:linear-gradient(90deg,#8ec5ff,#61dafb)}
+  #ttsPlayer{display:none}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Intelligent Voice Assistant Client / 智能语音助手客户端</h1>
+
+  <div id="controls">
+    <input type="text" id="wsUrl" value="ws://localhost:5000"/>
+    <button id="connectBtn">Connect / 连接</button>
+    <select id="micSelect" title="Select Microphone / 选择麦克风"></select>
+  </div>
+
+  <div class="status-panel">
+    <div id="wsStatus" class="status-box disconnected">Network status: Not connected / 网络状态: 未连接</div>
+    <div id="audioStatus" class="status-box idle">Audio Status: Standby / 音频状态: 待机</div>
+  </div>
+
+  <div class="row small">
+    <div style="min-width:90px">Input level / 输入电平</div>
+    <div class="vu" style="flex:1;min-width:200px"><div class="bar" id="vuBar"></div></div>
+    <div id="vadInfo" class="small">Threshold calibration... / 阈值校准中…</div>
+  </div>
+
+  <video id="videoPreview" autoplay muted playsinline></video>
+  <audio id="ttsPlayer"></audio>
+</div>
+
+<script>
+/* ---------------- DOM ---------------- */
+const wsUrlInput = document.getElementById('wsUrl');
+const connectBtn = document.getElementById('connectBtn');
+const wsStatusDiv = document.getElementById('wsStatus');
+const audioStatusDiv = document.getElementById('audioStatus');
+const videoPreview = document.getElementById('videoPreview');
+const ttsPlayer = document.getElementById('ttsPlayer');
+const micSelect = document.getElementById('micSelect');
+const vuBar = document.getElementById('vuBar');
+const vadInfo = document.getElementById('vadInfo');
+
+/* ---------------- State ---------------- */
+let websocket = null;
+let audioContext = null;
+let mediaStream = null;            // camera+mic
+let micStream = null;              // audio-only stream for MediaRecorder
+let mediaRecorder = null;
+let audioChunks = [];
+let imageSendingInterval = null;
+
+let analyser = null;
+let sourceNode = null;
+let scriptProcessor = null;
+let muteGain = null;
+
+let silenceTimer = null;
+let recordingStartTime = 0;
+let isCalibrating = true;
+let noiseFloor = 0.0;
+
+/* ---------------- Config ---------------- */
+let imageAnalysis_interval = 500;
+let imageAnalysis_quality = 0.8;
+
+const AUDIO_CONFIG = {
+  sampleRate: 16000,
+  vadThreshold: 0.2,        // 会被自适应覆盖
+  silenceDuration: 800,       // 停止录音的静音时长
+  minRecordingDuration: 500,  // 丢弃过短段
+  holdToStart: 120,           // 连续说话达到该毫秒才真正开始录
+  calibrationMs: 700          // 开机校准噪声底
+};
+const HEADER_SIZE = 4;
+
+/* ---------------- Utils ---------------- */
+function pickSupportedMime() {
+  const cands = [
+    'audio/webm;codecs=opus',
+    'audio/ogg;codecs=opus',
+    'audio/webm',
+    'audio/ogg'
+  ];
+  for (const t of cands) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return '';
+}
+const REC_MIME = pickSupportedMime();
+
+/* ---------------- UI ---------------- */
+function updateWsStatus(message, cls) {
+  wsStatusDiv.textContent = `Network Status / 网络状态: ${message}`;
+  wsStatusDiv.className = `status-box ${cls}`;
+}
+function updateAudioStatus(message, cls) {
+  if (audioStatusDiv.classList.contains('playing') && cls !== 'recording') return;
+  audioStatusDiv.textContent = `Audio Status / 音频状态: ${message}`;
+  audioStatusDiv.className = `status-box ${cls}`;
+}
+
+/* ---------------- Events ---------------- */
+connectBtn.addEventListener('click', async () => {
+  if (!websocket || websocket.readyState === WebSocket.CLOSED) {
+    if (!audioContext) {
+      try { audioContext = new (window.AudioContext || window.webkitAudioContext)(); }
+      catch { alert('浏览器不支持 AudioContext'); return; }
+    }
+    if (audioContext.state === 'suspended') await audioContext.resume();
+    connect();
+  } else {
+    disconnect();
+  }
+});
+
+ttsPlayer.onplay = () => updateAudioStatus('Playing TTS... / 正在播放TTS…', 'playing');
+ttsPlayer.onended = () => { if (!audioStatusDiv.classList.contains('recording')) updateAudioStatus('待机', 'idle'); };
+
+/* ---------------- Core ---------------- */
+async function enumerateMics(selectedId=null) {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  micSelect.innerHTML = '';
+  const mics = devices.filter(d => d.kind === 'audioinput');
+  for (const d of mics) {
+    const opt = document.createElement('option');
+    opt.value = d.deviceId;
+    opt.textContent = d.label || `Microphone / 麦克风 ${micSelect.length+1}`;
+    if (selectedId && selectedId === d.deviceId) opt.selected = true;
+    micSelect.appendChild(opt);
+  }
+}
+
+async function connect() {
+  const url = wsUrlInput.value;
+  websocket = new WebSocket(url);
+  updateWsStatus('Connecting... / 正在连接…', 'connecting');
+
+  websocket.onopen = async () => {
+    updateWsStatus('Connected / 已连接', 'connected');
+    connectBtn.textContent = '断开连接';
+    connectBtn.classList.add('connected');
+    try {
+      await startMedia();
+    } catch (e) {
+      console.error(e);
+      alert('无法启动媒体：' + e.message);
+      disconnect();
+    }
+  };
+
+  websocket.onmessage = (event) => {
+    if (typeof event.data === 'string') handleJsonMessage(event.data);
+    else if (event.data instanceof Blob) {
+      const audioUrl = URL.createObjectURL(event.data);
+      ttsPlayer.src = audioUrl;
+      ttsPlayer.play().catch(e => console.error('TTS 播放失败:', e));
+    }
+  };
+
+  websocket.onclose = () => { updateWsStatus('disconnected / 已断开连接', 'disconnected'); cleanup(); };
+  websocket.onerror = (e) => { console.error('WebSocket Error:', e); updateWsStatus('连接错误', 'disconnected'); cleanup(); };
+}
+
+function handleJsonMessage(text) {
+  try {
+    const msg = JSON.parse(text);
+    if (msg.imageAnalysis_interval != null) { imageAnalysis_interval = msg.imageAnalysis_interval; stopImageSending(); startImageSending(); }
+    if (msg.imageAnalysis_quality != null) { imageAnalysis_quality = msg.imageAnalysis_quality / 100; }
+  } catch (e) { console.warn('JSON 解析失败:', e); }
+}
+
+function disconnect() {
+  if (websocket) websocket.close();
+  cleanup();
+}
+
+function cleanup() {
+  stopMedia();
+  if (websocket) websocket = null;
+  if (audioContext && audioContext.state !== 'closed') { audioContext.close(); audioContext = null; }
+  connectBtn.textContent = '连接';
+  connectBtn.classList.remove('connected');
+  wsUrlInput.disabled = false;
+  updateWsStatus('已断开连接', 'disconnected');
+  updateAudioStatus('待机', 'idle');
+}
+
+async function startMedia() {
+  // 先拿到默认权限，之后再切换具体麦克风
+  mediaStream = await navigator.mediaDevices.getUserMedia({
+    video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+    audio: {
+      channelCount: 1,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true
+    }
+  });
+  videoPreview.srcObject = mediaStream;
+  wsUrlInput.disabled = true;
+
+  await enumerateMics();
+  micSelect.onchange = async () => { await switchMic(micSelect.value); };
+
+  // 默认 mic
+  await switchMic(micSelect.value || 'default');
+
+  startImageSending();
+  initAudioProcessing();
+}
+
+async function switchMic(deviceId) {
+  // 只换音频轨
+  const audioStream = await navigator.mediaDevices.getUserMedia({
+    audio: deviceId ? { deviceId: { exact: deviceId }, channelCount:1, echoCancellation:true, noiseSuppression:true, autoGainControl:true } : true
+  });
+  // 替换 mediaStream 中旧的 audio track（给预览/分析用）
+  if (mediaStream) {
+    mediaStream.getAudioTracks().forEach(t => mediaStream.removeTrack(t));
+    audioStream.getAudioTracks().forEach(t => mediaStream.addTrack(t));
+  }
+  // 给 MediaRecorder 使用的“纯音频流”
+  micStream?.getTracks().forEach(t => t.stop());
+  micStream = new MediaStream([audioStream.getAudioTracks()[0]]);
+  await enumerateMics(deviceId);
+}
+
+function stopMedia() {
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+  if (micStream)   { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  stopImageSending();
+  stopAudioProcessing();
+  videoPreview.srcObject = null;
+}
+
+function startImageSending() {
+  if (imageSendingInterval) clearInterval(imageSendingInterval);
+  imageSendingInterval = setInterval(() => {
+    if (websocket && websocket.readyState === WebSocket.OPEN) sendImageFrame();
+  }, imageAnalysis_interval);
+}
+function stopImageSending() {
+  if (imageSendingInterval) { clearInterval(imageSendingInterval); imageSendingInterval = null; }
+}
+
+function sendImageFrame() {
+  const canvas = document.createElement('canvas');
+  canvas.width = videoPreview.videoWidth;
+  canvas.height = videoPreview.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(videoPreview, 0, 0, canvas.width, canvas.height);
+  canvas.toBlob(async (blob) => {
+    if (!blob || !websocket || websocket.readyState !== WebSocket.OPEN) return;
+    const arrayBuffer = await blob.arrayBuffer();
+    const header = new Uint8Array([0,0,0,1]); // IMAGE
+    const data = new Uint8Array(HEADER_SIZE + arrayBuffer.byteLength);
+    data.set(header,0); data.set(new Uint8Array(arrayBuffer), HEADER_SIZE);
+    websocket.send(data.buffer);
+  }, 'image/jpeg', imageAnalysis_quality);
+}
+
+/* ----------- Audio Processing (fixed) ----------- */
+function initAudioProcessing() {
+  if (!mediaStream || !mediaStream.getAudioTracks().length || !audioContext || audioContext.state === 'closed') {
+    console.error('音频处理无法初始化');
+    return;
+  }
+  // 建链：Mic → Analyser → ScriptProcessor → MuteGain(0) → destination
+  sourceNode = audioContext.createMediaStreamSource(mediaStream);
+  analyser = audioContext.createAnalyser();
+  analyser.fftSize = 1024;
+  analyser.smoothingTimeConstant = 0.8;
+
+  scriptProcessor = audioContext.createScriptProcessor(2048, 1, 1);
+  muteGain = audioContext.createGain(); muteGain.gain.value = 0;
+
+  sourceNode.connect(analyser);
+  analyser.connect(scriptProcessor);
+  scriptProcessor.connect(muteGain);
+  muteGain.connect(audioContext.destination);
+
+  let speakAccumMs = 0;
+  let lastTick = performance.now();
+
+  // 启动时做一次自适应阈值校准
+  isCalibrating = true; noiseFloor = 0;
+  setTimeout(() => {
+    isCalibrating = false;
+    const thr = Math.max(0.002, noiseFloor * 2.5);
+    AUDIO_CONFIG.vadThreshold = thr;
+    vadInfo.textContent = `Thresholds / 阈值: ${thr.toFixed(4)} (Noise floor / 噪声底 ${noiseFloor.toFixed(4)})`;
+  }, AUDIO_CONFIG.calibrationMs);
+  vadInfo.textContent = '阈值校准中…';
+
+  scriptProcessor.onaudioprocess = () => {
+    const now = performance.now();
+    const dt = now - lastTick; lastTick = now;
+
+    const data = new Float32Array(analyser.fftSize);
+    analyser.getFloatTimeDomainData(data);
+    let sum = 0;
+    for (let i=0;i<data.length;i++) sum += data[i]*data[i];
+    const rms = Math.sqrt(sum / data.length);
+
+    // VU 可视化
+    const pct = Math.min(100, Math.floor(rms * 4000)); // 粗略映射
+    vuBar.style.width = pct + '%';
+
+    if (isCalibrating) {
+      // 指数平滑估计背景
+      noiseFloor = noiseFloor ? (noiseFloor*0.9 + rms*0.1) : rms;
+      return;
+    }
+
+    if (rms > AUDIO_CONFIG.vadThreshold) {
+      speakAccumMs += dt;
+      if (!ttsPlayer.paused) { ttsPlayer.pause(); ttsPlayer.src = ''; }
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+        // 需要连续说话达到 holdToStart 才开始录
+        if (speakAccumMs >= AUDIO_CONFIG.holdToStart) startRecording();
+      }
+      if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+    } else {
+      speakAccumMs = Math.max(0, speakAccumMs - dt); // 轻微抖动不立即丢
+      if (mediaRecorder && mediaRecorder.state === 'recording' && !silenceTimer) {
+        silenceTimer = setTimeout(stopRecording, AUDIO_CONFIG.silenceDuration);
+      }
+    }
+  };
+
+  console.log('音频处理已初始化');
+}
+
+function stopAudioProcessing() {
+  if (scriptProcessor) { scriptProcessor.disconnect(); scriptProcessor.onaudioprocess = null; }
+  if (analyser) analyser.disconnect();
+  if (sourceNode) sourceNode.disconnect();
+  if (muteGain) muteGain.disconnect();
+  analyser = sourceNode = scriptProcessor = muteGain = null;
+}
+
+function startRecording() {
+  if (!micStream) return;
+  try {
+    mediaRecorder = REC_MIME ? new MediaRecorder(micStream, { mimeType: REC_MIME }) : new MediaRecorder(micStream);
+  } catch (e) {
+    console.error('MediaRecorder 创建失败:', e);
+    updateAudioStatus('录音不可用', 'idle');
+    return;
+  }
+
+  audioChunks = [];
+
+  mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) audioChunks.push(e.data); };
+  mediaRecorder.onstart = () => { updateAudioStatus('Recording / 正在录音…', 'recording'); recordingStartTime = Date.now(); };
+  mediaRecorder.onstop = async () => {
+    const dur = Date.now() - recordingStartTime;
+    if (dur < AUDIO_CONFIG.minRecordingDuration || audioChunks.length === 0) {
+      updateAudioStatus('Idle / 待机', 'idle'); audioChunks = []; return;
+    }
+    updateAudioStatus('Process and send / 处理并发送中…', 'idle');
+    const blob = new Blob(audioChunks, { type: REC_MIME || 'audio/webm' });
+    audioChunks = [];
+    try {
+      const wavBuf = await convertToWav(blob);
+      const header = new Uint8Array([0,0,0,0]); // AUDIO
+      const out = new Uint8Array(HEADER_SIZE + wavBuf.byteLength);
+      out.set(header,0); out.set(new Uint8Array(wavBuf), HEADER_SIZE);
+      if (websocket && websocket.readyState === WebSocket.OPEN) websocket.send(out.buffer);
+    } catch (e) {
+      console.error('音频转换/发送失败:', e);
+    } finally {
+      setTimeout(() => { if (!ttsPlayer.duration || ttsPlayer.paused) updateAudioStatus('待机', 'idle'); }, 300);
+    }
+  };
+
+  mediaRecorder.start();
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+  if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+}
+
+/* ----------- WAV (16k) Resample ----------- */
+async function convertToWav(audioBlob) {
+  const arr = await audioBlob.arrayBuffer();
+  // 使用主 AudioContext 解码
+  const audioBuf = await audioContext.decodeAudioData(arr);
+  const frames = Math.ceil(audioBuf.duration * AUDIO_CONFIG.sampleRate);
+  const offline = new OfflineAudioContext(1, frames, AUDIO_CONFIG.sampleRate);
+  const src = offline.createBufferSource();
+  // 混单声道
+  const mono = offline.createBuffer(1, audioBuf.length, audioBuf.sampleRate);
+  const tmp = new Float32Array(audioBuf.length);
+  if (audioBuf.numberOfChannels === 1) {
+    audioBuf.copyFromChannel(tmp, 0);
+  } else {
+    const ch0 = new Float32Array(audioBuf.length), ch1 = new Float32Array(audioBuf.length);
+    audioBuf.copyFromChannel(ch0, 0); audioBuf.copyFromChannel(ch1, 1);
+    for (let i=0;i<tmp.length;i++) tmp[i] = (ch0[i] + ch1[i]) * 0.5;
+  }
+  mono.copyToChannel(tmp, 0);
+  src.buffer = mono;
+  src.connect(offline.destination);
+  src.start();
+  const rendered = await offline.startRendering();
+  return audioBufferToWav(rendered);
+}
+
+function audioBufferToWav(buffer) {
+  const numOfChan = 1;
+  const sampleRate = buffer.sampleRate;
+  const pcm = buffer.getChannelData(0);
+  const length = pcm.length * 2 + 44;
+  const ab = new ArrayBuffer(length);
+  const view = new DataView(ab);
+  let pos = 0;
+  const writeString = s => { for (let i=0;i<s.length;i++) view.setUint8(pos++, s.charCodeAt(i)); };
+  const setUint16 = d => { view.setUint16(pos, d, true); pos += 2; };
+  const setUint32 = d => { view.setUint32(pos, d, true); pos += 4; };
+
+  writeString('RIFF'); setUint32(length - 8); writeString('WAVE');
+  writeString('fmt '); setUint32(16); setUint16(1); setUint16(numOfChan);
+  setUint32(sampleRate); setUint32(sampleRate * numOfChan * 2);
+  setUint16(numOfChan * 2); setUint16(16);
+  writeString('data'); setUint32(length - pos - 4);
+  for (let i=0;i<pcm.length;i++){
+    let s = Math.max(-1, Math.min(1, pcm[i]));
+    s = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    view.setInt16(pos, s, true); pos += 2;
+  }
+  return ab;
+}
+</script>
+</body>
+</html>
