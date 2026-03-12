@@ -11,7 +11,7 @@ git checkout 12d6970271f5cdb91938f8ee7b2bbc60e60a0ea8
 cd ..
 ```
 
-Download `piece.pt` and `board.pt` and `model_1200000.safetensors` from `SWivid/F5-TTS` in `huggingface` and put it in `pre-trained-models`.
+Download `piece.pt` and `board.pt` and `model_1200000.safetensors` from [Baidu Netdisk](https://pan.baidu.com/s/1BqL2wdnbJaO880NKtBSQCg?pwd=wiwf) (and download pre-trained models from `SWivid/F5-TTS` in `huggingface`) and put them in `pre-trained-models`).
 
 ```
 conda activate Egocentric-Co-Pilot
