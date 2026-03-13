@@ -54,7 +54,7 @@ Click on the badges at the top of the page or the links below to navigate to the
 - [X] **LLM Orchestration & Execution** (WebSocket backend, TTS integration)
 - [X] **On-Device Perception** (Android CameraX App)
 - [X] **Proactive Intent Disambiguation** (Plug-and-play clarifier)
-- [ ] **WebRTC Integration** (*In Progress*)
+- [X] **WebRTC Integration** (aiortc backend, VAD + faster-whisper)
 - [ ] **External Tools Support** (*In Progress*)
 
 ---
