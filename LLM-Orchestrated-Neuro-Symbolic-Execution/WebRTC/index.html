@@ -22,10 +22,8 @@
   .video-box { flex: 1; min-width: 280px }
   .video-box label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 14px; color: #555 }
   video { width: 100%; border-radius: 8px; background: #000 }
-  #transcript { border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; min-height: 80px; max-height: 200px; overflow-y: auto; font-size: 14px; color: #333; background: #f8f9fa }
+  #transcript { border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; min-height: 80px; max-height: 200px; overflow-y: auto; font-size: 14px; color: #333; background: #f8f9fa; line-height: 1.6 }
   #transcript:empty::before { content: "ASR transcription will appear here..."; color: #aaa }
-  .transcript-line { padding: 4px 0; border-bottom: 1px solid #eee }
-  .transcript-line:last-child { border-bottom: none }
 </style>
 </head>
 <body>
@@ -73,10 +71,7 @@ function setStatus(text, cls) {
 }
 
 function addTranscript(text) {
-  const line = document.createElement('div');
-  line.className = 'transcript-line';
-  line.textContent = text;
-  transcript.appendChild(line);
+  transcript.textContent = text;
   transcript.scrollTop = transcript.scrollHeight;
 }
 

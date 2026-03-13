@@ -1,8 +1,8 @@
 """
 WebRTC demo server with:
   A. Video echo  — relays the browser's video track back so it appears on screen.
-  B. Whisper ASR — accumulates audio, detects speech, transcribes, and sends
-                   the text back via a WebRTC data channel.
+  B. Whisper ASR — VAD-based speech detection, transcribes with faster-whisper,
+                   sends text back via a WebRTC data channel.
 """
 
 import asyncio
@@ -10,22 +10,13 @@ import json
 import logging
 from pathlib import Path
 
+import av
 import numpy as np
+import webrtcvad
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.contrib.media import MediaRelay
-
-# --- Whisper (optional) ---
-try:
-    import whisper
-
-    logger_init = logging.getLogger(__name__)
-    logger_init.info("Loading Whisper model (base)...")
-    whisper_model = whisper.load_model("base")
-    ASR_AVAILABLE = True
-except ImportError:
-    whisper_model = None
-    ASR_AVAILABLE = False
+from faster_whisper import WhisperModel
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,20 +24,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-if not ASR_AVAILABLE:
-    logger.warning("openai-whisper not installed — ASR disabled. Install with: pip install -U openai-whisper")
-else:
-    logger.info("Whisper model loaded.")
+# --- faster-whisper (int8 on CPU for speed) ---
+logger.info("Loading faster-whisper model (tiny, int8)...")
+whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+logger.info("Model loaded.")
+
+# --- WebRTC VAD (aggressiveness 2 out of 0-3) ---
+vad = webrtcvad.Vad(2)
 
 ROOT = Path(__file__).parent
 pcs = set()
 relay = MediaRelay()
 
-WHISPER_SR = 16000
-
 
 # ---------------------------------------------------------------------------
-# A. Video: log frames (echo is handled by pc.addTrack in the offer handler)
+# A. Video: echo + log
 # ---------------------------------------------------------------------------
 async def consume_video(track):
     count = 0
@@ -62,43 +54,21 @@ async def consume_video(track):
 
 
 # ---------------------------------------------------------------------------
-# B. Audio: VAD → accumulate → Whisper → data channel
+# B. Audio: av.AudioResampler → WebRTC VAD → faster-whisper
 # ---------------------------------------------------------------------------
-def transcribe(audio_np):
-    """Run Whisper on a float32 numpy array (16 kHz)."""
-    result = whisper_model.transcribe(audio_np, language="en")
-    return result["text"].strip()
-
-
 async def consume_audio(track, dc_ref):
-    """Simple energy-based VAD → Whisper ASR → send text via data channel."""
+    """Resample to 16kHz mono, use VAD to detect speech, transcribe on silence."""
+    resampler = av.AudioResampler(format="s16", layout="mono", rate=16000)
 
-    # If Whisper is not available, fall back to logging only
-    if not ASR_AVAILABLE:
-        total = 0
-        while True:
-            try:
-                frame = await track.recv()
-            except Exception:
-                break
-            total += frame.samples
-            if total % 16000 < frame.samples:
-                logger.info(f"Audio: ~{total // 16000}s ({total} samples)")
-        return
+    audio_buffer = bytearray()  # speech audio for transcription
+    vad_buffer = bytearray()    # accumulates resampled data for VAD framing
+    silent_count = 0
+    speaking = False
+    full_text = ""
 
-    buffer = []
-    speech_active = False
-    silence_count = 0
-    speech_count = 0
-
-    ENERGY_THRESHOLD = 0.03   # higher to ignore background noise
-    SILENCE_LIMIT = 40        # consecutive silent frames to end a segment (~0.8s)
-    MIN_SPEECH_FRAMES = 10    # ignore very short bursts
-    MAX_BUFFER_SECONDS = 15   # hard cap to prevent runaway accumulation
-
-    # Calibrate noise floor from first ~50 frames
-    noise_samples = []
-    CALIBRATION_FRAMES = 50
+    MAX_SILENT_FRAMES = 20   # ~600ms silence triggers transcription
+    MAX_BUFFER_BYTES = 16000 * 2 * 10  # 10s hard cap (16kHz * 2 bytes * 10s)
+    VAD_FRAME_BYTES = 960    # 30ms at 16kHz, 16-bit mono = 480 samples * 2
 
     while True:
         try:
@@ -106,60 +76,51 @@ async def consume_audio(track, dc_ref):
         except Exception:
             break
 
-        samples = frame.to_ndarray().flatten().astype(np.float32) / 32768.0
-        energy = float(np.sqrt(np.mean(samples ** 2)))
-        src_sr = frame.sample_rate or 48000
+        # Resample to 16kHz mono s16
+        resampled_frames = resampler.resample(frame)
+        for rf in resampled_frames:
+            vad_buffer.extend(rf.to_ndarray().tobytes())
 
-        # Auto-calibrate threshold from initial noise floor
-        if len(noise_samples) < CALIBRATION_FRAMES:
-            noise_samples.append(energy)
-            if len(noise_samples) == CALIBRATION_FRAMES:
-                noise_floor = sum(noise_samples) / len(noise_samples)
-                ENERGY_THRESHOLD = max(0.03, noise_floor * 3.0)
-                logger.info(f"Audio calibrated: noise floor={noise_floor:.4f}, threshold={ENERGY_THRESHOLD:.4f}")
-            continue
+        # Process accumulated data in 30ms VAD frames
+        while len(vad_buffer) >= VAD_FRAME_BYTES:
+            chunk = bytes(vad_buffer[:VAD_FRAME_BYTES])
+            del vad_buffer[:VAD_FRAME_BYTES]
 
-        # Hard cap: flush buffer if it gets too long
-        total_buffered = sum(len(b) for b in buffer) / src_sr if buffer else 0
-        if total_buffered > MAX_BUFFER_SECONDS:
-            logger.warning(f"Buffer exceeded {MAX_BUFFER_SECONDS}s, flushing")
-            buffer.clear()
-            speech_active = False
-            silence_count = 0
-            speech_count = 0
-            continue
+            try:
+                is_speech = vad.is_speech(chunk, 16000)
+            except Exception:
+                is_speech = False
 
-        if energy > ENERGY_THRESHOLD:
-            speech_active = True
-            silence_count = 0
-            speech_count += 1
-            buffer.append(samples)
-        elif speech_active:
-            buffer.append(samples)
-            silence_count += 1
+            if is_speech:
+                audio_buffer.extend(chunk)
+                silent_count = 0
+                speaking = True
+            elif speaking:
+                audio_buffer.extend(chunk)
+                silent_count += 1
 
-            if silence_count >= SILENCE_LIMIT and speech_count >= MIN_SPEECH_FRAMES:
-                # Resample to 16 kHz
-                audio_full = np.concatenate(buffer)
-                n_out = int(len(audio_full) * WHISPER_SR / src_sr)
-                indices = np.round(np.linspace(0, len(audio_full) - 1, n_out)).astype(int)
-                audio_16k = audio_full[indices]
+            # Trigger transcription: speech ended or buffer too long
+            if speaking and (silent_count > MAX_SILENT_FRAMES or len(audio_buffer) > MAX_BUFFER_BYTES):
+                buf_dur = len(audio_buffer) / (16000 * 2)
+                logger.info(f"Transcribing {buf_dur:.1f}s of speech...")
 
-                duration = len(audio_16k) / WHISPER_SR
-                logger.info(f"Processing {duration:.1f}s of speech...")
+                audio_np = np.frombuffer(bytes(audio_buffer), dtype=np.int16).astype(np.float32) / 32768.0
 
-                text = await asyncio.to_thread(transcribe, audio_16k)
+                segments, _ = await asyncio.to_thread(
+                    whisper_model.transcribe, audio_np, beam_size=5, language="en"
+                )
+                text = "".join(s.text for s in segments).strip()
 
                 if text:
+                    full_text = (full_text + text) if full_text else text
                     logger.info(f"ASR: {text}")
                     dc = dc_ref[0]
                     if dc and dc.readyState == "open":
-                        dc.send(json.dumps({"type": "asr", "text": text}))
+                        dc.send(json.dumps({"type": "asr", "text": full_text}))
 
-                buffer.clear()
-                speech_active = False
-                silence_count = 0
-                speech_count = 0
+                audio_buffer.clear()
+                silent_count = 0
+                speaking = False
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +133,6 @@ async def offer(request):
     pc = RTCPeerConnection()
     pcs.add(pc)
 
-    # Mutable ref so consume_audio can access the data channel once it opens
     dc_ref = [None]
 
     @pc.on("datachannel")
@@ -192,13 +152,9 @@ async def offer(request):
         logger.info(f"Received {track.kind} track")
 
         if track.kind == "video":
-            # A: Echo video back to the browser
             pc.addTrack(relay.subscribe(track))
-            # Also log frames
             asyncio.ensure_future(consume_video(relay.subscribe(track)))
-
         elif track.kind == "audio":
-            # B: Run ASR and send text via data channel
             asyncio.ensure_future(consume_audio(relay.subscribe(track), dc_ref))
 
         @track.on("ended")
