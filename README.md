@@ -45,6 +45,8 @@ Click on the badges at the top of the page or the links below to navigate to the
   The Android front-end application built with CameraX. It handles real-time visual perception, port forwarding, and WebSocket communication with the back-end.
 * **[`Proactive-Multimodal-Intent-Disambiguation`](https://github.com/YoungSeng/Egocentric-Co-Pilot/tree/main/Proactive-Multimodal-Intent-Disambiguation)**
   Integrates our plug-and-play clarifier mechanism for the egocentric assistant. For the complete original codebase of this specific module, you can also refer to [YoungSeng/plug-and-play-clarifier](https://github.com/YoungSeng/plug-and-play-clarifier).
+* **[`External-Tools-Support`](./External-Tools-Support)**
+  Curated MCP, mobile automation, and phone/glasses bridge tooling for connecting egocentric agents to external device-control and utility tools.
 
 ---
 
@@ -55,7 +57,7 @@ Click on the badges at the top of the page or the links below to navigate to the
 - [X] **On-Device Perception** (Android CameraX App)
 - [X] **Proactive Intent Disambiguation** (Plug-and-play clarifier)
 - [X] **WebRTC Integration** (aiortc backend, VAD + faster-whisper)
-- [ ] **External Tools Support** (*In Progress*)
+- [X] **External Tools Support** (Initial release: MCP, mobile automation, and Glass2Phone bridge examples)
 
 ---
 
