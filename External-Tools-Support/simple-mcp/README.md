@@ -1,7 +1,5 @@
 # Simple MCP Examples
 
-This folder contains compact MCP examples copied from `Huawei/Projects/MCP/simple`.
-
 ## Files
 
 - `math_server.py`: stdio FastMCP server for evaluation, equation solving, differentiation, and integration.
