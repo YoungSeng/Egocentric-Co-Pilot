@@ -12,7 +12,7 @@ EGO4D = {
 }
 
 YOUCOOK2 = {
-    # "annotation_path": "/home/kyle/DOING_PROJECTS/Champion/reformulate/annotations/generated_youcookii_qa.json",
+    # "annotation_path": "./reformulate/annotations/generated_youcookii_qa.json",
     "annotation_path": "/mnt/data_3/home_aiglasses/FINAL_SFT/Youcook2/annotations/generated_youcookii_qav2.json",
     "data_path": "/mnt/data_3/home_aiglasses/YouCookII/",
 }
