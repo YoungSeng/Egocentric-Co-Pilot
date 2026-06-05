@@ -1,7 +1,5 @@
 # Glass2Phone Quickstart
 
-Curated phone/glasses bridge content copied from `Huawei/Projects/Glass2Phone/quickstart`.
-
 ## Included
 
 - `websocket-test/`: Python WebSocket client/server for echo and audio streaming tests.
