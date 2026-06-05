@@ -1,7 +1,5 @@
 # Android MCP
 
-Curated copy of the Android MCP server from `Huawei/Projects/MCP/Mobile/Android-MCP`.
-
 ## Tools
 
 - `State-Tool`: list visible, enabled interactive UI elements and center coordinates.
