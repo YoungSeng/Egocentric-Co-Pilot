@@ -1,14 +1,5 @@
 # External Tools Support
 
-This module collects curated external-tool examples for connecting Egocentric Co-Pilot style agents to mobile devices, MCP servers, and phone/glasses bridge workflows.
-
-The source material was copied from local Huawei project experiments under:
-
-- `/Users/kylehuang/Kyle/DOING_PROJECTS/Huawei/Projects/MCP`
-- `/Users/kylehuang/Kyle/DOING_PROJECTS/Huawei/Projects/Glass2Phone`
-
-Only compact source, configuration, and documentation were copied. Large upstream repositories, generated build outputs, model assets, `.git`, `.gradle`, `.idea`, `build`, `node_modules`, Vosk models, `whisper.cpp`, and other heavy artifacts are intentionally excluded.
-
 ## Contents
 
 | Folder | Purpose |
