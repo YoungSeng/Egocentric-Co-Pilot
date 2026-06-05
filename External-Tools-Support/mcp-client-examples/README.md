@@ -1,6 +1,5 @@
 # MCP Client Examples
 
-Copied from `Huawei/Projects/MCP/Mobile/Test`.
 
 ## Files
 
