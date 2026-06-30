@@ -1,5 +1,13 @@
 # External Tools Support
 
+## Demo
+
+[![Demo: YouTube](https://img.shields.io/badge/Demo-YouTube-FF0000.svg?logo=youtube)](https://youtube.com/shorts/qtELBRMpAW4)
+
+| Demo | Link |
+| :--- | :---: |
+| **External Tools / MCP walkthrough** | [📺 Watch](https://youtube.com/shorts/qtELBRMpAW4) |
+
 ## Contents
 
 | Folder | Purpose |

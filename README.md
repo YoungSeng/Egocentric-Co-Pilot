@@ -41,12 +41,12 @@ Click on the badges at the top of the page or the links below to navigate to the
   Contains our core reasoning model and fine-tuning (SFT) implementation for Multimodal LLMs (based on Qwen2.5-VL), including our Temporal Chain-of-Thought (T-CoT) strategy and HCC module. *(2nd Place Solution for the HD-EPIC VQA Challenge, CVPR 2025 EgoVis Workshop)*.
 * **[`LLM-Orchestrated-Neuro-Symbolic-Execution`](https://github.com/YoungSeng/Egocentric-Co-Pilot/tree/main/LLM-Orchestrated-Neuro-Symbolic-Execution)**
   The back-end environment for egocentric AI and interactive systems. Includes our WebSocket server setup, TTS integration (F5-TTS), and visual interface processing.
+* **[`External-Tools-Support`](./LLM-Orchestrated-Neuro-Symbolic-Execution/External-Tools-Support)**
+  Curated MCP, mobile automation, and phone/glasses bridge tooling for connecting egocentric agents to external device-control and utility tools. A demo video is available on [📺 YouTube](https://youtube.com/shorts/qtELBRMpAW4).
 * **[`On-Device-Perception-and-Interaction`](https://github.com/YoungSeng/Egocentric-Co-Pilot/tree/main/On-Device-Perception-and-Interaction)**
   The Android front-end application built with CameraX. It handles real-time visual perception, port forwarding, and WebSocket communication with the back-end.
 * **[`Proactive-Multimodal-Intent-Disambiguation`](https://github.com/YoungSeng/Egocentric-Co-Pilot/tree/main/Proactive-Multimodal-Intent-Disambiguation)**
   Integrates our plug-and-play clarifier mechanism for the egocentric assistant. For the complete original codebase of this specific module, you can also refer to [YoungSeng/plug-and-play-clarifier](https://github.com/YoungSeng/plug-and-play-clarifier).
-* **[`External-Tools-Support`](./External-Tools-Support)**
-  Curated MCP, mobile automation, and phone/glasses bridge tooling for connecting egocentric agents to external device-control and utility tools.
 
 ---
 
